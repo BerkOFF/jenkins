@@ -30,6 +30,7 @@ import com.google.common.collect.Lists;
 import com.google.inject.Injector;
 import hudson.ExtensionComponent;
 import hudson.ExtensionFinder;
+import hudson.model.LoadStatistics;
 import hudson.model.Messages;
 import hudson.model.Node;
 import hudson.model.AbstractCIBase;
@@ -161,6 +162,7 @@ import hudson.tasks.BuildWrapper;
 import hudson.tasks.Builder;
 import hudson.tasks.Mailer;
 import hudson.tasks.Publisher;
+import hudson.triggers.SafeTimerTask;
 import hudson.triggers.Trigger;
 import hudson.triggers.TriggerDescriptor;
 import hudson.util.AdministrativeError;
@@ -183,6 +185,7 @@ import hudson.util.RemotingDiagnostics;
 import hudson.util.RemotingDiagnostics.HeapDump;
 import hudson.util.StreamTaskListener;
 import hudson.util.TextFile;
+import hudson.util.TimeUnit2;
 import hudson.util.VersionNumber;
 import hudson.util.XStream2;
 import hudson.views.DefaultMyViewsTabBar;
@@ -569,14 +572,38 @@ public class Jenkins extends AbstractCIBase implements ModifiableItemGroup<TopLe
 
     /**
      * Load statistics of the entire system.
+     *
+     * This includes every executor and every job in the system.
      */
     @Exported
     public transient final OverallLoadStatistics overallLoad = new OverallLoadStatistics();
 
     /**
-     * {@link NodeProvisioner} that reacts to {@link OverallLoadStatistics}.
+     * Load statistics of the free roaming jobs and slaves.
+     * 
+     * This includes all executors on {@link Mode#NORMAL} nodes and jobs that do not have any assigned nodes.
+     *
+     * @since 1.467
      */
-    public transient final NodeProvisioner overallNodeProvisioner = new NodeProvisioner(null,overallLoad);
+    @Exported
+    public transient final LoadStatistics unlabeledLoad = new UnlabeldLoadStatistics();
+
+    /**
+     * {@link NodeProvisioner} that reacts to {@link #unlabeledLoad}.
+     * @since 1.467
+     */
+    public transient final NodeProvisioner unlabeledNodeProvisioner = new NodeProvisioner(null,unlabeledLoad);
+
+    /**
+     * @deprecated as of 1.467
+     *      Use {@link #unlabeledNodeProvisioner}.
+     *      This was broken because it was tracking all the executors in the system, but it was only tracking
+     *      free-roaming jobs in the queue. So {@link Cloud} fails to launch nodes when you have some exclusive
+     *      slaves and free-roaming jobs in the queue.
+     */
+    @Restricted(NoExternalUse.class)
+    public transient final NodeProvisioner overallNodeProvisioner = unlabeledNodeProvisioner;
+
 
     public transient final ServletContext servletContext;
 
@@ -787,6 +814,13 @@ public class Jenkins extends AbstractCIBase implements ModifiableItemGroup<TopLe
                 LOGGER.log(Level.WARNING, "Failed to broadcast over UDP",e);
             }
             dnsMultiCast = new DNSMultiCast(this);
+
+            Trigger.timer.scheduleAtFixedRate(new SafeTimerTask() {
+                @Override
+                protected void doRun() throws Exception {
+                    trimLabels();
+                }
+            }, TimeUnit2.MINUTES.toMillis(5), TimeUnit2.MINUTES.toMillis(5));
 
             updateComputerList();
 
@@ -1633,6 +1667,9 @@ public class Jenkins extends AbstractCIBase implements ModifiableItemGroup<TopLe
 
     /**
      * Resets all labels and remove invalid ones.
+     *
+     * This should be called when the assumptions behind label cache computation changes,
+     * but we also call this periodically to self-heal any data out-of-sync issue.
      */
     private void trimLabels() {
         for (Iterator<Label> itr = labels.values().iterator(); itr.hasNext();) {
@@ -2970,6 +3007,13 @@ public class Jenkins extends AbstractCIBase implements ModifiableItemGroup<TopLe
         rsp.setStatus(HttpServletResponse.SC_OK);
         rsp.setContentType("text/plain");
         rsp.getWriter().println("GCed");
+    }
+
+    /**
+     * End point that intentionally throws an exception to test the error behaviour.
+     */
+    public void doException() {
+        throw new RuntimeException();
     }
 
     public ContextMenu doContextMenu(StaplerRequest request, StaplerResponse response) throws IOException, JellyException {
