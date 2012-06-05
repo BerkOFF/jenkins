@@ -181,7 +181,6 @@ public class MatrixProject extends AbstractProject<MatrixProject, MatrixBuild>
      */
     private transient MatrixConfigurationSorter sorter;
     private MatrixExecutionStrategy executionStrategy;
-    private MatrixRunCheckoutStrategy matrixRunCheckoutStrategy;
 
     /**
      * Custom workspace location for {@link MatrixConfiguration}s.
@@ -315,22 +314,6 @@ public class MatrixProject extends AbstractProject<MatrixProject, MatrixBuild>
         }
 
         this.executionStrategy = executionStrategy;
-        save();
-    }
-
-    public MatrixRunCheckoutStrategy getMatrixRunCheckoutStrategy() {
-        return (matrixRunCheckoutStrategy == null)
-        ? new DefaultMatrixRunCheckoutStrategyImpl() : matrixRunCheckoutStrategy;
-    }
-
-    public void setMatrixRunCheckoutStrategy(
-        MatrixRunCheckoutStrategy matrixRunCheckoutStrategy)
-        throws IOException {
-        if (matrixRunCheckoutStrategy == null) {
-            throw new IllegalArgumentException();
-        }
-
-        this.matrixRunCheckoutStrategy = matrixRunCheckoutStrategy;
         save();
     }
 
@@ -900,20 +883,6 @@ public class MatrixProject extends AbstractProject<MatrixProject, MatrixBuild>
                     json.getJSONObject("executionStrategy"));
         }
 
-        try {
-            List<MatrixRunCheckoutStrategyDescriptor> mrcsd = MatrixRunCheckoutStrategyDescriptor.all();
-
-            if (mrcsd.size() > 1) {
-                matrixRunCheckoutStrategy = req.bindJSON(MatrixRunCheckoutStrategy.class,
-                        json.getJSONObject("matrixRunCheckoutStrategy"));
-            } else {
-                matrixRunCheckoutStrategy = req.bindJSON(mrcsd.get(0).clazz,
-                        json.getJSONObject("matrixRunCheckoutStrategy"));
-            }
-        } catch (Exception exc) {
-            matrixRunCheckoutStrategy = new DefaultMatrixRunCheckoutStrategyImpl();
-        }
-
         // parse system axes
         DescribableList<Axis, AxisDescriptor> newAxes = new DescribableList<Axis, AxisDescriptor>(this);
         newAxes.rebuildHetero(req, json, Axis.all(), "axis");
@@ -1005,6 +974,8 @@ public class MatrixProject extends AbstractProject<MatrixProject, MatrixBuild>
             return MatrixExecutionStrategyDescriptor.all();
         }
 
+        public List<SCMCheckoutStrategyDescriptor> getMatrixRunCheckoutStrategyDescriptors() {
+            return SCMCheckoutStrategyDescriptor.all();
         }
     }
 }
