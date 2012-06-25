@@ -29,6 +29,8 @@ import org.apache.commons.io.IOUtils;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * @author Kohsuke Kawaguchi
@@ -80,4 +82,34 @@ public class XStreamDOMTest extends TestCase {
         assertEquals(IOUtils.toString(getClass().getResourceAsStream("XStreamDOMTest.data1.xml")).trim(),xml.trim());
     }
 
+    public void testNoChild() {
+        String[] in = new String[0];
+        XStreamDOM dom = XStreamDOM.from(xs, in);
+        System.out.println(xs.toXML(dom));
+        String[] out = dom.unmarshal(xs);
+        assertEquals(in.length, out.length);
+    }
+
+    public void testNameEscape() {
+        Object o = new Name_That_Gets_Escaped();
+        XStreamDOM dom = XStreamDOM.from(xs, o);
+        System.out.println(xs.toXML(dom));
+        Object out = dom.unmarshal(xs);
+        assertEquals(o.getClass(),out.getClass());
+    }
+
+    public static class Name_That_Gets_Escaped {}
+
+    public static class DomInMap {
+        Map<String,XStreamDOM> values = new HashMap<String, XStreamDOM>();
+    }
+
+    public void testDomInMap() {
+        DomInMap v = new DomInMap();
+        v.values.put("foo",createSomeFoo().bar);
+        String xml = xs.toXML(v);
+        System.out.println(xml);
+        Object v2 = xs.fromXML(xml);
+        System.out.println(v2);
+    }
 }

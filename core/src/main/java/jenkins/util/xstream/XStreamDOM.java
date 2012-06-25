@@ -28,6 +28,7 @@ import com.thoughtworks.xstream.converters.Converter;
 import com.thoughtworks.xstream.converters.ErrorWriter;
 import com.thoughtworks.xstream.converters.MarshallingContext;
 import com.thoughtworks.xstream.converters.UnmarshallingContext;
+import com.thoughtworks.xstream.io.AttributeNameIterator;
 import com.thoughtworks.xstream.io.HierarchicalStreamReader;
 import com.thoughtworks.xstream.io.HierarchicalStreamWriter;
 import com.thoughtworks.xstream.io.xml.AbstractXmlReader;
@@ -35,8 +36,8 @@ import com.thoughtworks.xstream.io.xml.AbstractXmlWriter;
 import com.thoughtworks.xstream.io.xml.DocumentReader;
 import com.thoughtworks.xstream.io.xml.XmlFriendlyReplacer;
 import hudson.Util;
+import hudson.util.VariableResolver;
 
-import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -118,6 +119,29 @@ public class XStreamDOM {
         return (T)xs.unmarshal(newReader(),root);
     }
 
+    /**
+     * Recursively expands the variables in text and attribute values and return the new DOM.
+     *
+     * The expansion uses {@link Util#replaceMacro(String, VariableResolver)}, so any unresolved
+     * references will be left as-is.
+     */
+    public XStreamDOM expandMacro(VariableResolver<String> vars) {
+        String[] newAttributes = new String[attributes.length];
+        for (int i=0; i<attributes.length; i+=2) {
+            newAttributes[i+0] = attributes[i]; // name
+            newAttributes[i+1] = Util.replaceMacro(attributes[i+1],vars);
+        }
+
+        List<XStreamDOM> newChildren = null;
+        if (children!=null) {
+            newChildren = new ArrayList<XStreamDOM>(children.size());
+            for (XStreamDOM d : children)
+                newChildren.add(d.expandMacro(vars));
+        }
+
+        return new XStreamDOM(tagName,newAttributes,newChildren,Util.replaceMacro(value,vars));
+    }
+
     public String getAttribute(String name) {
         for (int i=0; i<attributes.length; i+=2)
             if (attributes[i].equals(name))
@@ -135,18 +159,6 @@ public class XStreamDOM {
 
     public String getAttribute(int index) {
         return attributes[index*2+1];
-    }
-
-    public Iterator<String> getAttributeNames() {
-        return new AbstractList<String>() {
-            public String get(int index) {
-                return getAttributeName(index);
-            }
-
-            public int size() {
-                return getAttributeCount();
-            }
-        }.iterator();
     }
 
     public String getValue() {
@@ -250,7 +262,7 @@ public class XStreamDOM {
         }
 
         public Iterator getAttributeNames() {
-            return current().node.getAttributeNames();
+            return new AttributeNameIterator(this);
         }
 
         public void appendErrors(ErrorWriter errorWriter) {
@@ -275,7 +287,7 @@ public class XStreamDOM {
         }
 
         public String getNodeName() {
-            return current().node.tagName;
+            return unescapeXmlName(current().node.tagName);
         }
 
         public String getValue() {
@@ -295,7 +307,7 @@ public class XStreamDOM {
         }
 
         public String getAttributeName(int index) {
-            return current().node.getAttributeName(index);
+            return unescapeXmlName(current().node.getAttributeName(index));
         }
     }
 
@@ -377,7 +389,7 @@ public class XStreamDOM {
             if (dom.value!=null)
                 w.setValue(dom.value);
             else {
-                for (XStreamDOM c : dom.children) {
+                for (XStreamDOM c : Util.fixNull(dom.children)) {
                     marshal(c, w, context);
                 }
             }

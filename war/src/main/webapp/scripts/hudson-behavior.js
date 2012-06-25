@@ -557,6 +557,8 @@ var jenkinsRules = {
         var menuAlign = (btn.getAttribute("menualign")||"tl-bl");
 
         var menuButton = new YAHOO.widget.Button(btn, { type: "menu", menu: menu, menualignment: menuAlign.split("-") });
+        $(menuButton._button).addClassName(btn.className);    // copy class names
+        $(menuButton._button).setAttribute("suffix",btn.getAttribute("suffix"));
         menuButton.getMenu().clickEvent.subscribe(function(type,args,value) {
             var item = args[1];
             if (item.cfg.getProperty("disabled"))   return;
@@ -680,7 +682,7 @@ var jenkinsRules = {
         e = null; // avoid memory leak
     },
 
-    "INPUT.applyButton":function (e) {
+    "INPUT.apply-button":function (e) {
         var id;
         var containerId = "container"+(iota++);
 
@@ -746,7 +748,7 @@ var jenkinsRules = {
         });
     },
 
-    "INPUT.advancedButton" : function(e) {
+    "INPUT.advanced-button" : function(e) {
         makeButton(e,function(e) {
             var link = e.target;
             while(!Element.hasClassName(link,"advancedLink"))
@@ -772,7 +774,7 @@ var jenkinsRules = {
         e = null; // avoid memory leak
     },
 
-    "INPUT.expandButton" : function(e) {
+    "INPUT.expand-button" : function(e) {
         makeButton(e,function(e) {
             var link = e.target;
             while(!Element.hasClassName(link,"advancedLink"))
