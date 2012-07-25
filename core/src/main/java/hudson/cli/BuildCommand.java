@@ -25,14 +25,16 @@ package hudson.cli;
 
 import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
-import hudson.model.Cause;
+import hudson.model.Cause.UserIdCause;
 import hudson.model.ParametersAction;
 import hudson.model.ParameterValue;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.ParameterDefinition;
 import hudson.Extension;
 import hudson.AbortException;
+import hudson.console.ModelHyperlinkNote;
 import hudson.model.Item;
+import hudson.model.TaskListener;
 import hudson.model.queue.QueueTaskFuture;
 import hudson.scm.PollingResult.Change;
 import hudson.util.EditDistance;
@@ -141,20 +143,27 @@ public class BuildCommand extends CLICommand {
         );
     }
 
-    public static class CLICause extends Cause {
+    public static class CLICause extends UserIdCause {
     	
     	private String startedBy;
     	
     	public CLICause(){
-    		startedBy = "unknown"; 
+    		startedBy = "unknown";
     	}
     	
     	public CLICause(String startedBy){
     		this.startedBy = startedBy;
     	}
     	
+        @Override
         public String getShortDescription() {
             return "Started by command line by " + startedBy;
+        }
+
+        @Override
+        public void print(TaskListener listener) {
+            listener.getLogger().println("Started by command line by " +
+                    ModelHyperlinkNote.encodeTo("/user/"+getUserId(), getUserName()));
         }
 
         @Override
