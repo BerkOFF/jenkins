@@ -570,7 +570,7 @@ var jenkinsRules = {
         ts_makeSortable(e);
     },
 
-    "TABLE.progress-bar" : function(e) {// sortable table
+    "TABLE.progress-bar" : function(e) { // progressBar.jelly
         e.onclick = function() {
             var href = this.getAttribute("href");
             if(href!=null)      window.location = href;
@@ -699,23 +699,6 @@ var jenkinsRules = {
         };
         e.tabIndex = 9999; // make help link unnavigable from keyboard
         e = null; // avoid memory leak
-    },
-
-    "TEXTAREA.codemirror" : function(e) {
-        var h = e.clientHeight;
-        var config = e.getAttribute("codemirror-config") || "";
-        config = eval('({'+config+'})');
-        var codemirror = CodeMirror.fromTextArea(e,config);
-        e.codemirrorObject = codemirror;
-        if(typeof(codemirror.getScrollerElement) !== "function") {
-            // Maybe older versions of CodeMirror do not provide getScrollerElement method.
-            codemirror.getScrollerElement = function(){
-                return findElementsBySelector(codemirror.getWrapperElement(), ".CodeMirror-scroll")[0];
-            };
-        }
-        var scroller = codemirror.getScrollerElement();
-        scroller.setAttribute("style","border:1px solid black;");
-        scroller.style.height = h+"px";
     },
 
     // Script Console : settings and shortcut key
@@ -1087,31 +1070,6 @@ var jenkinsRules = {
         updateDropDownList();
     },
 
-    // combobox.jelly
-    "INPUT.combobox2" : function(e) {
-        var items = [];
-
-        var c = new ComboBox(e,function(value) {
-            var candidates = [];
-            for (var i=0; i<items.length; i++) {
-                if (items[i].indexOf(value)==0) {
-                    candidates.push(items[i]);
-                    if (candidates.length>20)   break;
-                }
-            } 
-            return candidates;
-        }, {});
-
-        refillOnChange(e,function(params) {
-            new Ajax.Request(e.getAttribute("fillUrl"),{
-                parameters: params,
-                onSuccess : function(rsp) {
-                    items = eval('('+rsp.responseText+')');
-                }
-            });
-        });
-    },
-
     "A.showDetails" : function(e) {
         e.onclick = function() {
             this.style.display = 'none';
@@ -1128,46 +1086,6 @@ var jenkinsRules = {
 
     ".button-with-dropdown" : function (e) {
         new YAHOO.widget.Button(e, { type: "menu", menu: $(e).next() });
-    },
-
-    "DIV.textarea-preview-container" : function (e) {
-        var previewDiv = findElementsBySelector(e,".textarea-preview")[0];
-        var showPreview = findElementsBySelector(e,".textarea-show-preview")[0];
-        var hidePreview = findElementsBySelector(e,".textarea-hide-preview")[0];
-        $(hidePreview).hide();
-        $(previewDiv).hide();
-
-        showPreview.onclick = function() {
-            // Several TEXTAREAs may exist if CodeMirror is enabled. The first one has reference to the CodeMirror object.
-            var textarea = e.parentNode.getElementsByTagName("TEXTAREA")[0];
-            var text = textarea.codemirrorObject ? textarea.codemirrorObject.getValue() : textarea.value;
-            var render = function(txt) {
-                $(hidePreview).show();
-                $(previewDiv).show();
-                previewDiv.innerHTML = txt;
-                layoutUpdateCallback.call();
-            };
-
-            new Ajax.Request(rootURL + showPreview.getAttribute("previewEndpoint"), {
-                method: "POST",
-                requestHeaders: "Content-Type: application/x-www-form-urlencoded",
-                parameters: {
-                    text: text
-                },
-                onSuccess: function(obj) {
-                    render(obj.responseText)
-                },
-                onFailure: function(obj) {
-                    render(obj.status + " " + obj.statusText + "<HR/>" + obj.responseText)
-                }
-            });
-            return false;
-        }
-
-        hidePreview.onclick = function() {
-            $(hidePreview).hide();
-            $(previewDiv).hide();
-        };
     },
 
     /*

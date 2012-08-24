@@ -272,6 +272,17 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
     public abstract String getLabelString();
 
     /**
+     * Sets the label string for a node. This value will be returned by {@link #getLabelString()}.
+     *
+     * @param labelString
+     *      The new label string to use.
+     * @since 1.477
+     */
+    public void setLabelString(String labelString) throws IOException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
      * Gets the special label that represents this node itself.
      */
     @WithBridgeMethods(Label.class)

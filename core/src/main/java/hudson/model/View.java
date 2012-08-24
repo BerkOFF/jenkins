@@ -483,11 +483,15 @@ public abstract class View extends AbstractModelObject implements AccessControll
     	result.addAll(getOwnerViewActions());
     	synchronized (this) {
     		if (transientActions == null) {
-    			transientActions = TransientViewActionFactory.createAllFor(this); 
+                updateTransientActions();
     		}
     		result.addAll(transientActions);
     	}
     	return result;
+    }
+    
+    public synchronized void updateTransientActions() {
+        transientActions = TransientViewActionFactory.createAllFor(this); 
     }
     
     public Object getDynamic(String token) {
@@ -768,6 +772,7 @@ public abstract class View extends AbstractModelObject implements AccessControll
         rename(req.getParameter("name"));
 
         getProperties().rebuild(req, req.getSubmittedForm(), getApplicablePropertyDescriptors());
+        updateTransientActions();  
 
         save();
 
