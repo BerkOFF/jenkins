@@ -185,6 +185,14 @@ public class MatrixConfiguration extends Project<MatrixConfiguration,MatrixRun> 
     public int getScmCheckoutRetryCount() {
         return getParent().getScmCheckoutRetryCount();
     }
+    
+    /**
+     * Inherit the value from the parent.
+     */
+    @Override
+    public SCMCheckoutStrategy getScmCheckoutStrategy() {
+        return getParent().getScmCheckoutStrategy();
+    }
 
     /**
      * Inherit the value from the parent.
