@@ -28,16 +28,13 @@ import com.thoughtworks.xstream.converters.ConversionException;
 import com.thoughtworks.xstream.io.StreamException;
 import com.thoughtworks.xstream.io.xml.XppDriver;
 import hudson.DescriptorExtensionList;
-import hudson.Extension;
 import hudson.ExtensionPoint;
+import hudson.Functions;
 import hudson.Indenter;
 import hudson.Util;
-import hudson.XmlFile;
 import hudson.model.Descriptor.FormException;
-import hudson.model.Node.Mode;
-import hudson.model.labels.LabelAtom;
 import hudson.model.labels.LabelAtomPropertyDescriptor;
-import hudson.model.listeners.SaveableListener;
+import hudson.scm.ChangeLogSet;
 import hudson.scm.ChangeLogSet.Entry;
 import hudson.search.CollectionSearchIndex;
 import hudson.search.SearchIndexBuilder;
@@ -46,20 +43,25 @@ import hudson.security.AccessControlled;
 import hudson.security.Permission;
 import hudson.security.PermissionGroup;
 import hudson.security.PermissionScope;
+import hudson.tasks.UserAvatarResolver;
 import hudson.util.AlternativeUiTextProvider;
 import hudson.util.AlternativeUiTextProvider.Message;
-import hudson.util.AtomicFileWriter;
 import hudson.util.DescribableList;
 import hudson.util.DescriptorList;
+import hudson.util.FormApply;
 import hudson.util.IOException2;
-import hudson.util.IOUtils;
 import hudson.util.RunList;
 import hudson.util.XStream2;
 import hudson.views.ListViewColumn;
 import hudson.widgets.Widget;
 import jenkins.model.Jenkins;
+import jenkins.util.ProgressiveRendering;
+import net.sf.json.JSON;
+import net.sf.json.JSONArray;
+import net.sf.json.JSONObject;
 import org.kohsuke.stapler.HttpResponse;
 import org.kohsuke.stapler.HttpResponses;
+import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.StaplerResponse;
 import org.kohsuke.stapler.WebMethod;
@@ -77,7 +79,6 @@ import javax.xml.transform.stream.StreamResult;
 import javax.xml.transform.stream.StreamSource;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringWriter;
@@ -98,6 +99,8 @@ import java.util.logging.Logger;
 
 import static javax.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
 import static jenkins.model.Jenkins.*;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Encapsulates the rendering of the list of {@link TopLevelItem}s
@@ -281,15 +284,14 @@ public abstract class View extends AbstractModelObject implements AccessControll
         // see JENKINS-9431
         //
         // until we have that, putting this logic here.
-        synchronized (this) {
+        synchronized (PropertyList.class) {
             if (properties == null) {
                 properties = new PropertyList(this);
             } else {
                 properties.setOwner(this);
             }
+            return properties;
         }
-
-        return properties;
     }
 
     /**
@@ -426,14 +428,14 @@ public abstract class View extends AbstractModelObject implements AccessControll
         return true;
     }
 
-    public List<Queue.Item> getQueueItems() {
+    private List<Queue.Item> filterQueue(List<Queue.Item> base) {
         if (!isFilterQueue()) {
-            return Arrays.asList(Jenkins.getInstance().getQueue().getItems());
+            return base;
         }
 
         Collection<TopLevelItem> items = getItems();
         List<Queue.Item> result = new ArrayList<Queue.Item>();
-        for (Queue.Item qi : Jenkins.getInstance().getQueue().getItems()) {
+        for (Queue.Item qi : base) {
             if (items.contains(qi.task)) {
                 result.add(qi);
             } else
@@ -445,6 +447,14 @@ public abstract class View extends AbstractModelObject implements AccessControll
             }
         }
         return result;
+    }
+
+    public List<Queue.Item> getQueueItems() {
+        return filterQueue(Arrays.asList(Jenkins.getInstance().getQueue().getItems()));
+    }
+
+    public List<Queue.Item> getApproximateQueueItemsQuickly() {
+        return filterQueue(Jenkins.getInstance().getQueue().getApproximateItemsQuickly());
     }
 
     /**
@@ -569,6 +579,9 @@ public abstract class View extends AbstractModelObject implements AccessControll
          */
         private AbstractProject project;
 
+        /** @see UserAvatarResolver */
+        String avatar;
+
         UserInfo(User user, AbstractProject p, Calendar lastChange) {
             this.user = user;
             this.project = p;
@@ -620,6 +633,7 @@ public abstract class View extends AbstractModelObject implements AccessControll
 
     /**
      * Does this {@link View} has any associated user information recorded?
+     * @deprecated Potentially very expensive call; do not use from Jelly views.
      */
     public boolean hasPeople() {
         return People.isApplicable(getItems());
@@ -632,12 +646,19 @@ public abstract class View extends AbstractModelObject implements AccessControll
         return new People(this);
     }
 
+    /**
+     * @since 1.484
+     */
+    public AsynchPeople getAsynchPeople() {
+        return new AsynchPeople(this);
+    }
+
     @ExportedBean
     public static final class People  {
         @Exported
         public final List<UserInfo> users;
 
-        public final Object parent;
+        public final ModelObject parent;
 
         public People(Jenkins parent) {
             this.parent = parent;
@@ -694,6 +715,9 @@ public abstract class View extends AbstractModelObject implements AccessControll
             return new Api(this);
         }
 
+        /**
+         * @deprecated Potentially very expensive call; do not use from Jelly views.
+         */
         public static boolean isApplicable(Collection<? extends Item> items) {
             for (Item item : items) {
                 for (Job job : item.getAllJobs()) {
@@ -711,6 +735,139 @@ public abstract class View extends AbstractModelObject implements AccessControll
             }
             return false;
         }
+    }
+
+    /**
+     * Variant of {@link People} which can be displayed progressively, since it may be slow.
+     * @since 1.484
+     */
+    public static final class AsynchPeople extends ProgressiveRendering { // JENKINS-15206
+
+        private final Collection<TopLevelItem> items;
+        private final User unknown;
+        private final Map<User,UserInfo> users = new HashMap<User,UserInfo>();
+        private final Set<User> modified = new HashSet<User>();
+        private final String iconSize;
+        public final ModelObject parent;
+
+        /** @see Jenkins#getAsynchPeople} */
+        public AsynchPeople(Jenkins parent) {
+            this.parent = parent;
+            items = parent.getItems();
+            unknown = User.getUnknown();
+        }
+
+        /** @see View#getAsynchPeople */
+        public AsynchPeople(View parent) {
+            this.parent = parent;
+            items = parent.getItems();
+            unknown = null;
+        }
+
+        {
+            StaplerRequest req = Stapler.getCurrentRequest();
+            iconSize = req != null ? Functions.getCookie(req, "iconSize", "32x32") : "32x32";
+        }
+
+        @Override protected void compute() throws Exception {
+            int itemCount = 0;
+            for (Item item : items) {
+                for (Job<?,?> job : item.getAllJobs()) {
+                    if (job instanceof AbstractProject) {
+                        AbstractProject<?,?> p = (AbstractProject) job;
+                        RunList<? extends AbstractBuild<?,?>> builds = p.getBuilds();
+                        int buildCount = 0;
+                        for (AbstractBuild<?,?> build : builds) {
+                            if (canceled()) {
+                                return;
+                            }
+                            for (ChangeLogSet.Entry entry : build.getChangeSet()) {
+                                User user = entry.getAuthor();
+                                UserInfo info = users.get(user);
+                                if (info == null) {
+                                    UserInfo userInfo = new UserInfo(user, p, build.getTimestamp());
+                                    userInfo.avatar = UserAvatarResolver.resolve(user, iconSize);
+                                    synchronized (this) {
+                                        users.put(user, userInfo);
+                                        modified.add(user);
+                                    }
+                                } else if (info.getLastChange().before(build.getTimestamp())) {
+                                    synchronized (this) {
+                                        info.project = p;
+                                        info.lastChange = build.getTimestamp();
+                                        modified.add(user);
+                                    }
+                                }
+                            }
+                            // XXX consider also adding the user of the UserCause when applicable
+                            buildCount++;
+                            progress((itemCount + 1.0 * buildCount / builds.size()) / (items.size() + 1));
+                        }
+                    }
+                }
+                itemCount++;
+                progress(1.0 * itemCount / (items.size() + /* handling User.getAll */1));
+            }
+            if (unknown != null) {
+                if (canceled()) {
+                    return;
+                }
+                for (User u : User.getAll()) { // XXX nice to have a method to iterate these lazily
+                    if (u == unknown) {
+                        continue;
+                    }
+                    if (!users.containsKey(u)) {
+                        UserInfo userInfo = new UserInfo(u, null, null);
+                        userInfo.avatar = UserAvatarResolver.resolve(u, iconSize);
+                        synchronized (this) {
+                            users.put(u, userInfo);
+                            modified.add(u);
+                        }
+                    }
+                }
+            }
+        }
+
+        @Override protected synchronized JSON data() {
+            JSONArray r = new JSONArray();
+            for (User u : modified) {
+                UserInfo i = users.get(u);
+                JSONObject entry = new JSONObject().
+                        accumulate("id", u.getId()).
+                        accumulate("fullName", u.getFullName()).
+                        accumulate("url", u.getUrl()).
+                        accumulate("avatar", i.avatar).
+                        accumulate("timeSortKey", i.getTimeSortKey()).
+                        accumulate("lastChangeTimeString", i.getLastChangeTimeString());
+                AbstractProject<?,?> p = i.getProject();
+                if (p != null) {
+                    entry.accumulate("projectUrl", p.getUrl()).accumulate("projectFullDisplayName", p.getFullDisplayName());
+                }
+                r.add(entry);
+            }
+            modified.clear();
+            return r;
+        }
+
+        public Api getApi() {
+            return new Api(new People());
+        }
+
+        /** JENKINS-16397 workaround */
+        @Restricted(NoExternalUse.class)
+        @ExportedBean
+        public final class People {
+
+            private View.People people;
+
+            @Exported public synchronized List<UserInfo> getUsers() {
+                if (people == null) {
+                    people = parent instanceof Jenkins ? new View.People((Jenkins) parent) : new View.People((View) parent);
+                }
+                return people.users;
+            }
+        }
+
     }
 
     void addDisplayNamesToSearchIndex(SearchIndexBuilder sib, Collection<TopLevelItem> items) {
@@ -776,7 +933,7 @@ public abstract class View extends AbstractModelObject implements AccessControll
 
         save();
 
-        rsp.sendRedirect2("../"+name);
+        FormApply.success("../"+name).generateResponse(req,rsp,this);
     }
 
     /**

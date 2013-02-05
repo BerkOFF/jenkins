@@ -40,8 +40,7 @@ function updateListBox(listBox,url,config) {
     new Ajax.Request(url, config);
 }
 
-Behaviour.register({
-    "SELECT.select" : function(e) {
+Behaviour.specify("SELECT.select", 'select', 0, function(e) {
         // controls that this SELECT box depends on
         refillOnChange(e,function(params) {
             var value = e.value;
@@ -58,10 +57,11 @@ Behaviour.register({
                         }
                     }
 
+                    fireEvent(e,"filled"); // let other interested parties know that the items have changed
+
                     // if the update changed the current selection, others listening to this control needs to be notified.
                     if (e.value!=value) fireEvent(e,"change");
                 }
             });
         });
-    }
 });

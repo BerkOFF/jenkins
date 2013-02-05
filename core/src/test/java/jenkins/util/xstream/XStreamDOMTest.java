@@ -23,11 +23,19 @@
  */
 package jenkins.util.xstream;
 
+import com.thoughtworks.xstream.io.xml.XppDriver;
 import hudson.util.XStream2;
-import junit.framework.TestCase;
+import jenkins.util.xstream.XStreamDOM.ConverterImpl;
 import org.apache.commons.io.IOUtils;
+import org.junit.Before;
+import org.junit.Test;
+
+import static org.junit.Assert.*;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.StringReader;
+import java.io.StringWriter;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -35,7 +43,7 @@ import java.util.Map;
 /**
  * @author Kohsuke Kawaguchi
  */
-public class XStreamDOMTest extends TestCase {
+public class XStreamDOMTest {
 
     private XStream2 xs;
 
@@ -44,19 +52,28 @@ public class XStreamDOMTest extends TestCase {
         XStreamDOM zot;
     }
 
-    @Override
-    protected void setUp() throws Exception {
-        super.setUp();
+    @Before
+    public void setUp() throws Exception {
         xs = new XStream2();
         xs.alias("foo", Foo.class);
     }
 
+    @Test
     public void testMarshal() throws IOException {
         Foo foo = createSomeFoo();
         String xml = xs.toXML(foo);
         System.out.println(xml);
-        assertEquals(IOUtils.toString(getClass().getResourceAsStream("XStreamDOMTest.data1.xml")).trim(),xml.trim());
+        assertEquals(getTestData1().trim(), xml.trim());
     }
+
+    private String getTestData1() throws IOException {
+        return getTestData("XStreamDOMTest.data1.xml");
+    }
+
+    private String getTestData(String resourceName) throws IOException {
+        return IOUtils.toString(getClass().getResourceAsStream(resourceName)).replaceAll("\r\n", "\n");
+    }
+
 
     private Foo createSomeFoo() {
         Foo foo = new Foo();
@@ -65,13 +82,21 @@ public class XStreamDOMTest extends TestCase {
         return foo;
     }
 
+    @Test
     public void testUnmarshal() throws Exception {
-        Foo foo = (Foo) xs.fromXML(getClass().getResourceAsStream("XStreamDOMTest.data1.xml"));
+        InputStream is = XStreamDOMTest.class.getResourceAsStream("XStreamDOMTest.data1.xml");
+        Foo foo;
+        try {
+            foo = (Foo) xs.fromXML(is);
+        } finally {
+            is.close();
+        }
         assertEquals("test1",foo.bar.getTagName());
         assertEquals("value",foo.bar.getAttribute("key"));
         assertEquals("text!",foo.bar.getValue());
     }
 
+    @Test
     public void testWriteToDOM() throws Exception {
         // roundtrip via DOM
         XStreamDOM dom = XStreamDOM.from(xs, createSomeFoo());
@@ -79,9 +104,10 @@ public class XStreamDOMTest extends TestCase {
 
         String xml = xs.toXML(foo);
         System.out.println(xml);
-        assertEquals(IOUtils.toString(getClass().getResourceAsStream("XStreamDOMTest.data1.xml")).trim(),xml.trim());
+        assertEquals(getTestData1().trim(), xml.trim());
     }
 
+    @Test
     public void testNoChild() {
         String[] in = new String[0];
         XStreamDOM dom = XStreamDOM.from(xs, in);
@@ -90,6 +116,7 @@ public class XStreamDOMTest extends TestCase {
         assertEquals(in.length, out.length);
     }
 
+    @Test
     public void testNameEscape() {
         Object o = new Name_That_Gets_Escaped();
         XStreamDOM dom = XStreamDOM.from(xs, o);
@@ -104,12 +131,45 @@ public class XStreamDOMTest extends TestCase {
         Map<String,XStreamDOM> values = new HashMap<String, XStreamDOM>();
     }
 
+    @Test
     public void testDomInMap() {
         DomInMap v = new DomInMap();
         v.values.put("foo",createSomeFoo().bar);
         String xml = xs.toXML(v);
-        System.out.println(xml);
         Object v2 = xs.fromXML(xml);
-        System.out.println(v2);
+        assertTrue(v2 instanceof DomInMap);
+        assertXStreamDOMEquals(v.values.get("foo"), ((DomInMap)v2).values.get("foo"));
+    }
+    
+    private void assertXStreamDOMEquals(XStreamDOM expected, XStreamDOM actual) {
+        assertEquals(expected.getTagName(), actual.getTagName());
+        assertEquals(expected.getValue(), actual.getValue());
+        
+        assertEquals(expected.getAttributeCount(), actual.getAttributeCount());
+        for (int i=0; i<expected.getAttributeCount(); i++) {
+            assertEquals(expected.getAttributeName(i), actual.getAttributeName(i));
+            assertEquals(expected.getAttribute(i), actual.getAttribute(i));
+        }
+        
+        if (expected.getChildren() == null) {
+            assertNull(actual.getChildren());
+        } else {
+            assertEquals(expected.getChildren().size(), actual.getChildren().size());
+            int childrenCount = expected.getChildren().size();
+            for (int i=0; i<childrenCount; i++) {
+                assertXStreamDOMEquals(expected.getChildren().get(i), actual.getChildren().get(i));
+            }
+        }
+    }
+
+    @Test
+    public void readFromInputStream() throws Exception {
+        for (String name : new String[]{"XStreamDOMTest.data1.xml","XStreamDOMTest.data2.xml"}) {
+            String input = getTestData(name);
+            XStreamDOM dom = XStreamDOM.from(new StringReader(input));
+            StringWriter sw = new StringWriter();
+            dom.writeTo(sw);
+            assertEquals(input.trim(),sw.toString().trim());
+        }
     }
 }
